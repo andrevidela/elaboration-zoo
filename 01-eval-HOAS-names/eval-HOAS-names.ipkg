@@ -1,0 +1,4 @@
+package eval-HOAS-names
+
+depends = parser, elab-util, contrib
+modules = Main
