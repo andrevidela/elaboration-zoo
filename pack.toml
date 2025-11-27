@@ -1,0 +1,5 @@
+[custom.all.fs-utils]
+type = "git"
+url = "https://gitlab.com/avidela/fs-utils"
+commit = "main"
+ipkg = "fs-utils.ipkg"

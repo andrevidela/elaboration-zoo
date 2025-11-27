@@ -9,6 +9,9 @@ import Text.PrettyPrint.Prettyprinter.Doc
 
 import Derive.Prelude
 
+import System
+import System.File
+import System.Utils
 
 %hide TT.Name
 %language ElabReflection
@@ -137,6 +140,14 @@ letTerm = do
 
 term = lambda <|> letTerm <|> app
 
+parseString : String -> IO Tm
+
+parseStdin : IO Tm
+parseStdin = readSTDIN' >>= parseString
+
+-- printing
+--------------------------------------------------------------------------------
+
 prettyTerm : Bool -> Tm -> Doc ann
 prettyTerm k (Var s) = pretty s
 prettyTerm k (Lam str x) = "λ" <++> pretty str <++> softline <+> "." <++> prettyTerm False x
@@ -150,3 +161,31 @@ prettyTerm k (Let str expr body) =
 Pretty Tm where
   pretty = prettyTerm False
 
+Show Tm where
+  show = ?aido
+
+-- main
+--------------------------------------------------------------------------------
+
+helpMsg : String
+helpMsg = unlines [
+  "usage: elabzoo-eval [--help|nf]",
+  "  --help : display this message",
+  "  nf     : read expression from stdin, print its normal form"]
+
+partial
+mainWith : IO (List String) -> IO Tm -> IO ()
+mainWith getOpt getTm = do
+  getOpt >>= \case
+    ["--help"] => putStrLn helpMsg
+    ["nf"]     => printLn . nf []  =<< getTm
+    _          => putStrLn helpMsg
+
+partial
+main : IO ()
+main = mainWith getArgs parseStdin
+
+-- | Run main with inputs as function arguments.
+partial
+main' : String -> String -> IO ()
+main' mode src = mainWith (pure [mode]) (parseString src)
