@@ -2,3 +2,5 @@ package eval-HOAS-names
 
 depends = parser, elab-util, contrib, fs-utils
 modules = Main
+main = Main
+executable = hoas-names

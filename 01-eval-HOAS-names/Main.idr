@@ -28,6 +28,25 @@ data Tm
   | App Tm Tm          -- t u
   | Let Name Tm Tm     -- let x = t; u
 
+-- printing
+--------------------------------------------------------------------------------
+
+prettyTerm : Bool -> Tm -> Doc ann
+prettyTerm k (Var s) = pretty s
+prettyTerm k (Lam str x) = "λ" <++> pretty str <++> softline <+> "." <++> prettyTerm False x
+prettyTerm k (App x y) =
+  let app : Doc ann = prettyTerm False x <++> prettyTerm True y
+  in if k then Doc.surround {ann} "(" app ")" else app
+prettyTerm k (Let str expr body) =
+  "let" <++> pretty str <++> "=" <++> prettyTerm False expr <++>
+  softline <+> "in" <++> prettyTerm False body
+
+Pretty Tm where
+  pretty = prettyTerm False
+
+Show Tm where
+  show x = show (pretty {ann = ()} x)
+
 -- evaluation
 --------------------------------------------------------------------------------
 
@@ -76,6 +95,7 @@ nf env = quote (map fst env) . eval env
 
 data LambdaToken
   = LamTok | In | LetTok | EqTok | Dot | Ident String | LParen | RParen
+  | Skip
 
 %runElab derive "LambdaToken" [Eq]
 
@@ -88,19 +108,26 @@ Interpolation LambdaToken where
   interpolate (Ident str) = str
   interpolate LParen = "("
   interpolate RParen = ")"
+  interpolate Skip = ""
 
 idLexer : Lexer
-idLexer = pred isAlpha <++> preds isAlphaNum
+idLexer = pred isAlpha <++> preds0 isAlphaNum
 
 lambdaTokenMap : TokenMap LambdaToken
 lambdaTokenMap =
   [ (is 'λ' , const LamTok)
+  , (is '\\' , const LamTok)
+  , (exact "let", const LetTok)
   , (is '.' , const Dot)
   , (is '=' , const EqTok)
-  , (is '(' , const RParen)
-  , (is ')' , const LParen)
+  , (is '(' , const LParen)
+  , (is ')' , const RParen)
   , (exact "in" , const In)
+  , (is ';' , const In)
   , (idLexer , Ident . cast)
+  , (lineComment (exact "--"), const Skip)
+  , (newline, const Skip)
+  , (space, const Skip)
   ]
 
 0 Rule : Bool -> Type -> Type
@@ -123,10 +150,10 @@ app = foldl1 App <$> some atom
 lambda : Rule True Tm
 lambda = do
   is LamTok
-  name <- identifier
+  names <- some identifier
   is Dot
   tm <- term
-  pure $ Lam name tm
+  pure $ foldr Lam tm names
 
 letTerm : Rule True Tm
 letTerm = do
@@ -141,28 +168,23 @@ letTerm = do
 term = lambda <|> letTerm <|> app
 
 parseString : String -> IO Tm
+parseString str =
+  let tokens = mapFst (toParseError {e = Void} Virtual str) $ lexManual (first lambdaTokenMap) str
+  in case tokens of
+          Left err => die "lexer error: \{show err}"
+          Right val =>
+            let noComment = filter (\x => x.val /= Skip) val
+            in case parse term () noComment of
+                    Left es                => let qq : List1 ? =  (toParseError {e = String} Virtual str <$> es)
+                                              in die "parse errors: \{show qq}"
+                    Right ((),res,[])      => pure res
+                    Right ((),res,(x::xs)) =>
+                      let qq = (toParseError {e = String} Virtual str $ Expected [] . interpolate <$> x)
+                      in die "so far: \{show res}\nparse error: \n\{show qq}"
 
 parseStdin : IO Tm
 parseStdin = readSTDIN' >>= parseString
 
--- printing
---------------------------------------------------------------------------------
-
-prettyTerm : Bool -> Tm -> Doc ann
-prettyTerm k (Var s) = pretty s
-prettyTerm k (Lam str x) = "λ" <++> pretty str <++> softline <+> "." <++> prettyTerm False x
-prettyTerm k (App x y) =
-  let app : Doc ann = prettyTerm False x <++> prettyTerm True y
-  in if k then Doc.surround {ann} "(" ")" app else app
-prettyTerm k (Let str expr body) =
-  "let" <++> pretty str <++> "=" <++> prettyTerm False expr <++>
-  softline <+> "in" <++> prettyTerm False body
-
-Pretty Tm where
-  pretty = prettyTerm False
-
-Show Tm where
-  show = ?aido
 
 -- main
 --------------------------------------------------------------------------------
@@ -177,8 +199,8 @@ partial
 mainWith : IO (List String) -> IO Tm -> IO ()
 mainWith getOpt getTm = do
   getOpt >>= \case
-    ["--help"] => putStrLn helpMsg
-    ["nf"]     => printLn . nf []  =<< getTm
+    [_, "--help"] => putStrLn helpMsg
+    [_, "nf"]     => printLn . nf []  =<< getTm
     _          => putStrLn helpMsg
 
 partial
